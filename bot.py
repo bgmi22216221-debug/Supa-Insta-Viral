@@ -285,6 +285,26 @@ async def reject_user(user_id: int):
     async with pool.acquire() as conn:
         await conn.execute("UPDATE users SET is_approved = FALSE, is_rejected = TRUE WHERE user_id = $1", user_id)
 
+async def send_welcome_video(bot: Bot, user_id: int):
+    """
+    Approve hone ke baad user ko ek media send karo with buttons.
+    10 min baad auto-delete ho jayega.
+    """
+    try:
+        media = await get_next_media(user_id)
+        if not media:
+            logger.warning(f"send_welcome_video: No media found for user {user_id}")
+            return
+        await mark_seen(user_id, media["id"])
+        msg = await _copy_media(bot, user_id, media)
+        await save_position(user_id, media["id"], msg.message_id)
+        await auto_delete(bot, user_id, msg.message_id, AUTO_DELETE_SECONDS)
+        logger.info(f"🎬 Welcome video sent to approved user {user_id} (msg_id={msg.message_id})")
+    except TelegramError as e:
+        logger.warning(f"send_welcome_video TelegramError for {user_id}: {e}")
+    except Exception as e:
+        logger.error(f"send_welcome_video error for {user_id}: {e}")
+
 def approval_keyboard(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton(f"✅ Approve ({APPROVAL_DAYS} Days)", callback_data=f"approve_{user_id}"),
@@ -618,11 +638,12 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             try:
                 await ctx.bot.send_message(
                     target_id,
-                    f"🎉 *Aapka access restore ho gaya!*\n\n📅 Expiry: *{expires.strftime('%d %b %Y')}*\n\n/start dabao aur enjoy karo 🚀",
+                    f"🎉 *Aapka access approve ho gaya!*\n\n📅 Expiry: *{expires.strftime('%d %b %Y')}*\n\n✨ Enjoy karo — pehli video neeche aa rahi hai! 🎬",
                     parse_mode="Markdown"
                 )
             except TelegramError:
                 pass
+            _fire_and_forget(send_welcome_video(ctx.bot, target_id))
         elif data.startswith("reject_"):
             await reject_user(target_id)
             await query.edit_message_text(query.message.text + "\n\n❌ *Rejected by admin.*", parse_mode="Markdown")
@@ -878,9 +899,10 @@ async def unban_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     await unban_user(target_id)
     try:
-        await ctx.bot.send_message(chat_id=target_id, text="✅ *Aapka ban hata diya gaya hai!*\n/start dabao aur enjoy karo 🎉", parse_mode="Markdown")
+        await ctx.bot.send_message(chat_id=target_id, text="✅ *Aapka ban hata diya gaya hai!*\n\n✨ Enjoy karo — pehli video neeche aa rahi hai! 🎬", parse_mode="Markdown")
     except TelegramError:
         pass
+    _fire_and_forget(send_welcome_video(ctx.bot, target_id))
     await update.message.reply_text(f"✅ User `{target_id}` unban ho gaya!", parse_mode="Markdown")
 
 
@@ -916,9 +938,10 @@ async def approve_cmd(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     expires = await approve_user(target_id)
     await update.message.reply_text(f"✅ User `{target_id}` approve ho gaya!\n📅 Expiry: *{expires.strftime('%d %b %Y')}*", parse_mode="Markdown")
     try:
-        await ctx.bot.send_message(target_id, f"🎉 *Aapka access restore ho gaya!*\n\n📅 Expiry: *{expires.strftime('%d %b %Y')}*\n\n/start dabao aur enjoy karo 🚀", parse_mode="Markdown")
+        await ctx.bot.send_message(target_id, f"🎉 *Aapka access approve ho gaya!*\n\n📅 Expiry: *{expires.strftime('%d %b %Y')}*\n\n✨ Enjoy karo — pehli video neeche aa rahi hai! 🎬", parse_mode="Markdown")
     except TelegramError:
         pass
+    _fire_and_forget(send_welcome_video(ctx.bot, target_id))
 
 
 # ─── Admin: /reject ────────────────────────────────────────────────────────────
